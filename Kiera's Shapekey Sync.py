@@ -14,6 +14,24 @@ from bpy.app import timers
 from bpy.app.handlers import persistent
 
 # ------------------------------------------------------------------------
+#    Helpers
+# ------------------------------------------------------------------------
+
+_SHAPE_KEY_OBJECT_TYPES = {'MESH', 'CURVE', 'SURFACE', 'LATTICE'}
+
+
+def _get_shape_keys(obj):
+    """Return an object's shape key datablock, or None if it has none."""
+    if obj is None or obj.data is None:
+        return None
+    return getattr(obj.data, "shape_keys", None)
+
+
+def _shape_key_object_poll(self, obj):
+    """Restrict object pickers to types that support shape keys."""
+    return obj.type in _SHAPE_KEY_OBJECT_TYPES
+
+# ------------------------------------------------------------------------
 #    Property Groups
 # ------------------------------------------------------------------------
 
@@ -49,7 +67,11 @@ class SyncItem(bpy.types.PropertyGroup):
     use: bpy.props.BoolProperty(default=True)
 
 class TargetItem(bpy.types.PropertyGroup):
-    obj: bpy.props.PointerProperty(type=bpy.types.Object, update=_target_obj_update)
+    obj: bpy.props.PointerProperty(
+        type=bpy.types.Object,
+        poll=_shape_key_object_poll,
+        update=_target_obj_update,
+    )
 
 class RecordItem(bpy.types.PropertyGroup):
     obj: bpy.props.PointerProperty(type=bpy.types.Object)
@@ -63,8 +85,8 @@ class FoldoutItem(bpy.types.PropertyGroup):
 #    Core Sync Functions
 # ------------------------------------------------------------------------
 def sync_shapekey_drivers(src_obj, tgt_obj, key_names, records):
-    src_keys = src_obj.data.shape_keys
-    tgt_keys = tgt_obj.data.shape_keys
+    src_keys = _get_shape_keys(src_obj)
+    tgt_keys = _get_shape_keys(tgt_obj)
     if not src_keys or not tgt_keys:
         return 0
     count = 0
@@ -75,7 +97,7 @@ def sync_shapekey_drivers(src_obj, tgt_obj, key_names, records):
                 tgt_keys.driver_remove(path)
             except Exception:
                 pass
-            fcurve = tgt_obj.data.shape_keys.driver_add(path)
+            fcurve = tgt_keys.driver_add(path)
             driver = fcurve.driver
             driver.type = 'AVERAGE'
             var = driver.variables.new()
@@ -136,22 +158,26 @@ def _update_preview(context):
     src = scn.sync_src_obj
     targets = [t.obj for t in scn.sync_targets if t.obj]
     if key:
-        if src and src.data.shape_keys and key in src.data.shape_keys.key_blocks:
-            src.data.shape_keys.key_blocks[key].value = val
+        src_keys = _get_shape_keys(src)
+        if src_keys and key in src_keys.key_blocks:
+            src_keys.key_blocks[key].value = val
         for obj in targets:
-            if obj.data.shape_keys and key in obj.data.shape_keys.key_blocks:
-                obj.data.shape_keys.key_blocks[key].value = val
+            obj_keys = _get_shape_keys(obj)
+            if obj_keys and key in obj_keys.key_blocks:
+                obj_keys.key_blocks[key].value = val
 
 def _refresh_key_list(context):
     """Refresh the key list based on current source and target objects."""
     scn = context.scene
     scn.sync_items.clear()
     names = set()
-    if scn.sync_src_obj and scn.sync_src_obj.data.shape_keys:
-        names.update(scn.sync_src_obj.data.shape_keys.key_blocks.keys())
+    src_keys = _get_shape_keys(scn.sync_src_obj)
+    if src_keys:
+        names.update(src_keys.key_blocks.keys())
     for t in scn.sync_targets:
-        if t.obj and t.obj.data.shape_keys:
-            names.update(t.obj.data.shape_keys.key_blocks.keys())
+        tgt_keys = _get_shape_keys(t.obj)
+        if tgt_keys:
+            names.update(tgt_keys.key_blocks.keys())
     for name in sorted(names):
         itm = scn.sync_items.add()
         itm.name = name
@@ -299,8 +325,9 @@ class SHAPEKEYSYNC_OT_resync_object(bpy.types.Operator):
             unsync_selected(scn.sync_records, idxs)
 
         # optionally pick up *new* shape keys present on the object
-        if tgt.data.shape_keys:
-            for kb in tgt.data.shape_keys.key_blocks:
+        tgt_keys = _get_shape_keys(tgt)
+        if tgt_keys:
+            for kb in tgt_keys.key_blocks:
                 if kb.name not in keys:
                     keys.add(kb.name)
 
@@ -337,8 +364,9 @@ class SHAPEKEYSYNC_OT_resync_all(bpy.types.Operator):
                 unsync_selected(scn.sync_records, idxs)
 
             # include any new shapekeys that may have been added
-            if tgt.data.shape_keys:
-                for kb in tgt.data.shape_keys.key_blocks:
+            tgt_keys = _get_shape_keys(tgt)
+            if tgt_keys:
+                for kb in tgt_keys.key_blocks:
                     keys.add(kb.name)
 
             sync_shapekey_drivers(src, tgt, list(keys), scn.sync_records)
@@ -440,6 +468,7 @@ def register():
         bpy.utils.register_class(cls)
     bpy.types.Scene.sync_src_obj = bpy.props.PointerProperty(
         type=bpy.types.Object,
+        poll=_shape_key_object_poll,
         update=_source_obj_update
     )
     bpy.types.Scene.sync_targets = bpy.props.CollectionProperty(type=TargetItem)
