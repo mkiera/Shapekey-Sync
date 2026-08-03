@@ -239,23 +239,6 @@ def rebuild_foldouts(scn):
 # ------------------------------------------------------------------------
 #    Operators
 # ------------------------------------------------------------------------
-class SHAPEKEYSYNC_OT_add_target(bpy.types.Operator):
-    bl_idname = "shapekey_sync.add_target"
-    bl_label = "Add Target"
-    def execute(self, context):
-        context.scene.sync_targets.add()
-        return {'FINISHED'}
-
-class SHAPEKEYSYNC_OT_remove_target(bpy.types.Operator):
-    bl_idname = "shapekey_sync.remove_target"
-    bl_label = "Remove Target"
-    def execute(self, context):
-        scn = context.scene
-        idx = scn.sync_target_index
-        scn.sync_targets.remove(idx)
-        scn.sync_target_index = max(0, idx-1)
-        return {'FINISHED'}
-
 class SHAPEKEYSYNC_OT_refresh(bpy.types.Operator):
     bl_idname = "shapekey_sync.refresh_list"
     bl_label = "Refresh Key List"
@@ -291,20 +274,6 @@ class SHAPEKEYSYNC_OT_unsync_all(bpy.types.Operator):
         _purge_dead_records(scn)
         targets = [t.obj for t in scn.sync_targets if t.obj]
         removed = unsync_records(scn.sync_records, filter_targets=targets)
-        rebuild_foldouts(scn)
-        self.report({'INFO'}, f"Removed {removed} drivers.")
-        return {'FINISHED'}
-
-class SHAPEKEYSYNC_OT_unsync_selected(bpy.types.Operator):
-    bl_idname = "shapekey_sync.unsync_selected"
-    bl_label = "Remove Selected"
-    bl_options = {'REGISTER', 'UNDO'}
-    def execute(self, context):
-        scn = context.scene
-        _purge_dead_records(scn)
-        idx = scn.sync_records_index
-        indices = getattr(scn, 'sync_records_index_set', [idx])
-        removed = unsync_selected(scn.sync_records, indices)
         rebuild_foldouts(scn)
         self.report({'INFO'}, f"Removed {removed} drivers.")
         return {'FINISHED'}
@@ -503,9 +472,8 @@ class SHAPEKEYSYNC_PT_panel(bpy.types.Panel):
 # ------------------------------------------------------------------------
 classes = [
     SyncItem, TargetItem, RecordItem, FoldoutItem,
-    SHAPEKEYSYNC_OT_add_target, SHAPEKEYSYNC_OT_remove_target,
     SHAPEKEYSYNC_OT_refresh, SHAPEKEYSYNC_OT_sync,
-    SHAPEKEYSYNC_OT_unsync_all, SHAPEKEYSYNC_OT_unsync_selected,
+    SHAPEKEYSYNC_OT_unsync_all,
     SHAPEKEYSYNC_OT_unsync_key, SHAPEKEYSYNC_OT_unsync_object,
     SHAPEKEYSYNC_UL_list_keys, SHAPEKEYSYNC_UL_list_targets,
     SHAPEKEYSYNC_PT_panel, SHAPEKEYSYNC_OT_resync_object, SHAPEKEYSYNC_OT_resync_all
@@ -528,7 +496,6 @@ def register():
         name='Value', min=0.0, max=1.0, update=lambda self, ctx: _update_preview(ctx)
     )
     bpy.types.Scene.sync_records = bpy.props.CollectionProperty(type=RecordItem)
-    bpy.types.Scene.sync_records_index = bpy.props.IntProperty()
     bpy.types.Scene.sync_foldouts = bpy.props.CollectionProperty(type=FoldoutItem)
     bpy.types.Scene.sync_key_list_expanded = BoolProperty(default=False)
 
@@ -546,7 +513,6 @@ def unregister():
     del bpy.types.Scene.preview_key
     del bpy.types.Scene.preview_value
     del bpy.types.Scene.sync_records
-    del bpy.types.Scene.sync_records_index
     del bpy.types.Scene.sync_foldouts
     del bpy.types.Scene.sync_key_list_expanded
     
