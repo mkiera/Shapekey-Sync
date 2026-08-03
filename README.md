@@ -57,7 +57,7 @@ Keep track of your synced shapekeys with these features:
 
 ## 💻 Requirements
 
-- Blender 4.3.1 or newer (tested through Blender 5.2 LTS)
+- Blender 4.3.1 or newer, including the 5.x series (5.0, 5.1, and 5.2 LTS)
 - Objects must have shapekeys to sync
 
 ## 🤝 Contributing
