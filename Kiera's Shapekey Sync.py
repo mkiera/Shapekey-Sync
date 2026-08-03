@@ -32,6 +32,14 @@ def _shape_key_object_poll(self, obj):
     return obj.type in _SHAPE_KEY_OBJECT_TYPES
 
 
+def _target_object_poll(self, obj):
+    """Targets must support shape keys and differ from the source object."""
+    if not _shape_key_object_poll(self, obj):
+        return False
+    scn = getattr(bpy.context, "scene", None)
+    return scn is None or scn.sync_src_obj != obj
+
+
 def _key_data_path(name):
     """RNA data path for a shape key's value, with the name safely escaped."""
     return f'key_blocks["{bpy.utils.escape_identifier(name)}"].value'
@@ -74,7 +82,7 @@ class SyncItem(bpy.types.PropertyGroup):
 class TargetItem(bpy.types.PropertyGroup):
     obj: bpy.props.PointerProperty(
         type=bpy.types.Object,
-        poll=_shape_key_object_poll,
+        poll=_target_object_poll,
         update=_target_obj_update,
     )
 
@@ -263,7 +271,7 @@ class SHAPEKEYSYNC_OT_sync(bpy.types.Operator):
         scn = context.scene
         _purge_dead_records(scn)
         src = scn.sync_src_obj
-        targets = [t.obj for t in scn.sync_targets if t.obj]
+        targets = [t.obj for t in scn.sync_targets if t.obj and t.obj != src]
         keys = [i.name for i in scn.sync_items if i.use]
         recs = scn.sync_records
         if not src or not targets or not keys:
@@ -348,6 +356,10 @@ class SHAPEKEYSYNC_OT_resync_object(bpy.types.Operator):
             self.report({'ERROR'}, f"Target '{self.obj_name}' not found.")
             return {'CANCELLED'}
 
+        if tgt == src:
+            self.report({'ERROR'}, "Cannot resync the source object onto itself.")
+            return {'CANCELLED'}
+
         # gather keys already tracked for this object
         keys = {rec.key for rec in scn.sync_records if rec.obj.name == self.obj_name}
 
@@ -391,6 +403,9 @@ class SHAPEKEYSYNC_OT_resync_all(bpy.types.Operator):
 
         total_keys = 0
         for tgt, keys in obj_keys.items():
+            if tgt == src:
+                continue
+
             # wipe old drivers/records for this object
             idxs = [i for i, r in enumerate(scn.sync_records) if r.obj == tgt]
             if idxs:
