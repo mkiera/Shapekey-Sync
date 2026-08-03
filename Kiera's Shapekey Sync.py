@@ -360,10 +360,6 @@ class SHAPEKEYSYNC_OT_resync_object(bpy.types.Operator):
             self.report({'ERROR'}, f"Target '{self.obj_name}' not found.")
             return {'CANCELLED'}
 
-        if tgt == src:
-            self.report({'ERROR'}, "Cannot resync the source object onto itself.")
-            return {'CANCELLED'}
-
         # gather keys already tracked for this object
         keys = {rec.key for rec in scn.sync_records if rec.obj.name == self.obj_name}
 
@@ -371,6 +367,12 @@ class SHAPEKEYSYNC_OT_resync_object(bpy.types.Operator):
         idxs = [i for i, rec in enumerate(scn.sync_records) if rec.obj.name == self.obj_name]
         if idxs:
             unsync_selected(scn.sync_records, idxs)
+
+        # the source cannot drive itself, so only its stale records are cleared
+        if tgt == src:
+            rebuild_foldouts(scn)
+            self.report({'INFO'}, f"'{self.obj_name}' is the source object; cleared its stale syncs.")
+            return {'FINISHED'}
 
         # pick up new shape keys present on the object
         tgt_keys = _get_shape_keys(tgt)
@@ -406,14 +408,16 @@ class SHAPEKEYSYNC_OT_resync_all(bpy.types.Operator):
             obj_keys.setdefault(rec.obj, set()).add(rec.key)
 
         total_keys = 0
+        resynced = 0
         for tgt, keys in obj_keys.items():
-            if tgt == src:
-                continue
-
             # wipe old drivers/records for this object
             idxs = [i for i, r in enumerate(scn.sync_records) if r.obj == tgt]
             if idxs:
                 unsync_selected(scn.sync_records, idxs)
+
+            # the source cannot drive itself, so its stale records are only cleared
+            if tgt == src:
+                continue
 
             # include any new shapekeys that may have been added
             tgt_keys = _get_shape_keys(tgt)
@@ -423,9 +427,10 @@ class SHAPEKEYSYNC_OT_resync_all(bpy.types.Operator):
 
             sync_shapekey_drivers(src, tgt, list(keys), scn.sync_records)
             total_keys += len(keys)
+            resynced += 1
 
         rebuild_foldouts(scn)
-        self.report({'INFO'}, f"Resynced {total_keys} keys on {len(obj_keys)} objects.")
+        self.report({'INFO'}, f"Resynced {total_keys} keys on {resynced} objects.")
         return {'FINISHED'}
 
 
