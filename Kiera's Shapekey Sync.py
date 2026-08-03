@@ -116,9 +116,10 @@ def sync_shapekey_drivers(src_obj, tgt_obj, key_names, records):
             var.name = 'var'
             var.targets[0].id = src_obj
             var.targets[0].data_path = f'data.shape_keys.key_blocks["{name}"].value'
-            rec = records.add()
-            rec.obj = tgt_obj
-            rec.key = name
+            if not any(rec.obj == tgt_obj and rec.key == name for rec in records):
+                rec = records.add()
+                rec.obj = tgt_obj
+                rec.key = name
             count += 1
     return count
 
