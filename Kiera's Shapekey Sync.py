@@ -279,6 +279,17 @@ def rebuild_foldouts(scn):
 #    Operators
 # ------------------------------------------------------------------------
 
+class SHAPEKEYSYNC_OT_add_target(bpy.types.Operator):
+    """Add an empty target slot to the target list"""
+    bl_idname = "shapekey_sync.add_target"
+    bl_label = "Add Target"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        context.scene.sync_targets.add()
+        return {'FINISHED'}
+
+
 class SHAPEKEYSYNC_OT_refresh(bpy.types.Operator):
     """Rebuild the key list from the current source and target objects"""
     bl_idname = "shapekey_sync.refresh_list"
@@ -489,13 +500,16 @@ class SHAPEKEYSYNC_PT_panel(bpy.types.Panel):
 
         # Source & Targets
         layout.prop(scn, 'sync_src_obj', text='Source Object')
-        row = layout.row()
-        row.template_list(
-            'SHAPEKEYSYNC_UL_list_targets', '',
-            scn, 'sync_targets',
-            scn, 'sync_target_index',
-            rows=3,
-        )
+        if len(scn.sync_targets) == 0:
+            layout.operator('shapekey_sync.add_target', icon='ADD')
+        else:
+            row = layout.row()
+            row.template_list(
+                'SHAPEKEYSYNC_UL_list_targets', '',
+                scn, 'sync_targets',
+                scn, 'sync_target_index',
+                rows=3,
+            )
 
         # Key List Foldout
         row = layout.row()
@@ -556,6 +570,7 @@ classes = [
     TargetItem,
     RecordItem,
     FoldoutItem,
+    SHAPEKEYSYNC_OT_add_target,
     SHAPEKEYSYNC_OT_refresh,
     SHAPEKEYSYNC_OT_sync,
     SHAPEKEYSYNC_OT_unsync_all,
