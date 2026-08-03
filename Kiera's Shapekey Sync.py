@@ -50,8 +50,9 @@ def _key_data_path(name):
 
 def _ensure_initial_target_slot():
     """Adds an initial target slot if the list is empty."""
-    if len(bpy.context.scene.sync_targets) == 0:
-        bpy.context.scene.sync_targets.add()
+    scn = getattr(bpy.context, "scene", None)
+    if scn is not None and len(scn.sync_targets) == 0:
+        scn.sync_targets.add()
 
 @persistent
 def _on_file_load(_):
@@ -496,10 +497,16 @@ def register():
     bpy.types.Scene.sync_foldouts = bpy.props.CollectionProperty(type=FoldoutItem)
     bpy.types.Scene.sync_key_list_expanded = BoolProperty(default=False)
 
-    bpy.app.handlers.load_post.append(_on_file_load)
+    if _on_file_load not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_on_file_load)
     timers.register(_ensure_initial_target_slot)
 
 def unregister():
+    if _on_file_load in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_on_file_load)
+    if timers.is_registered(_ensure_initial_target_slot):
+        timers.unregister(_ensure_initial_target_slot)
+
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
     del bpy.types.Scene.sync_src_obj
@@ -512,8 +519,6 @@ def unregister():
     del bpy.types.Scene.sync_records
     del bpy.types.Scene.sync_foldouts
     del bpy.types.Scene.sync_key_list_expanded
-    
-    bpy.app.handlers.load_post.remove(_on_file_load)
 
 if __name__ == "__main__":
     register()
