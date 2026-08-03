@@ -169,6 +169,29 @@ def _purge_dead_records(scn):
         rec.key = key
 
 
+def _collect_targets(scn, src):
+    """Target objects to drive: no duplicates, no source, one per shape key set.
+
+    Linked duplicates share a single shape key datablock, so driving each of
+    them in turn would write the same drivers repeatedly and record one sync
+    per object for what is really one set of drivers.
+    """
+    src_keys = _get_shape_keys(src)
+    seen_key_data = {src_keys} if src_keys else set()
+    targets = []
+    for t in scn.sync_targets:
+        obj = t.obj
+        if obj is None or obj == src or obj in targets:
+            continue
+        obj_keys = _get_shape_keys(obj)
+        if obj_keys is not None:
+            if obj_keys in seen_key_data:
+                continue
+            seen_key_data.add(obj_keys)
+        targets.append(obj)
+    return targets
+
+
 def sync_shapekey_drivers(src_obj, tgt_obj, key_names, records):
     """Drive the named keys on tgt_obj from src_obj, tracking each sync."""
     src_keys = _get_shape_keys(src_obj)
@@ -276,7 +299,7 @@ class SHAPEKEYSYNC_OT_sync(bpy.types.Operator):
         scn = context.scene
         _purge_dead_records(scn)
         src = scn.sync_src_obj
-        targets = [t.obj for t in scn.sync_targets if t.obj and t.obj != src]
+        targets = _collect_targets(scn, src)
         keys = [i.name for i in scn.sync_items if i.use]
         recs = scn.sync_records
         if not src or not targets or not keys:
