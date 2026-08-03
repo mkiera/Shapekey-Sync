@@ -191,6 +191,7 @@ def _update_preview(context):
 def _refresh_key_list(context):
     """Refresh the key list based on current source and target objects."""
     scn = context.scene
+    previous = {item.name: item.use for item in scn.sync_items}
     scn.sync_items.clear()
     names = set()
     src_keys = _get_shape_keys(scn.sync_src_obj)
@@ -203,7 +204,7 @@ def _refresh_key_list(context):
     for name in sorted(names):
         itm = scn.sync_items.add()
         itm.name = name
-        itm.use = True
+        itm.use = previous.get(name, True)
 
 def _source_obj_update(self, context):
     """Update key list when source object changes."""
