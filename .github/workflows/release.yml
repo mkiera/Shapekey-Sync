@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  ADDON_FILE: "shapekey_sync.py"
+  ADDON_MODULE: "shapekey_sync"
+
+jobs:
+  release:
+    name: Build and publish the add-on zip
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v4
+
+      - name: Verify bl_info version matches the tag
+        run: |
+          python3 - "$GITHUB_REF_NAME" <<'PY'
+          import ast
+          import os
+          import sys
+
+          tag = sys.argv[1]
+          addon_file = os.environ["ADDON_FILE"]
+          with open(addon_file, encoding="utf-8") as fh:
+              tree = ast.parse(fh.read())
+
+          for node in tree.body:
+              if not isinstance(node, ast.Assign):
+                  continue
+              target = node.targets[0]
+              if isinstance(target, ast.Name) and target.id == "bl_info":
+                  bl_info = ast.literal_eval(node.value)
+                  break
+          else:
+              sys.exit(f"bl_info not found in {addon_file}")
+
+          declared = list(bl_info["version"])
+          wanted = [int(part) for part in tag.lstrip("v").split(".")]
+          if declared[:len(wanted)] != wanted:
+              sys.exit(
+                  f"tag {tag} does not match bl_info version {tuple(declared)}; "
+                  "update bl_info before tagging"
+              )
+          print(f"bl_info version {tuple(declared)} matches tag {tag}")
+          PY
+
+      - name: Build the add-on zip
+        run: |
+          zip_name="Shapekey Sync ${GITHUB_REF_NAME}.zip"
+          mkdir -p "build/${ADDON_MODULE}"
+          cp "${ADDON_FILE}" "build/${ADDON_MODULE}/__init__.py"
+          (cd build && zip -r "../${zip_name}" "${ADDON_MODULE}")
+          unzip -l "${zip_name}"
+          echo "ZIP_NAME=${zip_name}" >> "$GITHUB_ENV"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$ZIP_NAME" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$ZIP_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi
