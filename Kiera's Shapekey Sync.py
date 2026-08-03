@@ -9,7 +9,6 @@ bl_info = {
 }
 
 import bpy
-from bpy.props import BoolProperty
 from bpy.app import timers
 from bpy.app.handlers import persistent
 
@@ -44,31 +43,56 @@ def _key_data_path(name):
     """RNA data path for a shape key's value, with the name safely escaped."""
     return f'key_blocks["{bpy.utils.escape_identifier(name)}"].value'
 
+
 # ------------------------------------------------------------------------
-#    Property Groups
+#    Update Callbacks & Handlers
 # ------------------------------------------------------------------------
 
 def _ensure_initial_target_slot():
-    """Adds an initial target slot if the list is empty."""
+    """Add an initial target slot if the list is empty."""
     scn = getattr(bpy.context, "scene", None)
     if scn is not None and len(scn.sync_targets) == 0:
         scn.sync_targets.add()
 
+
 @persistent
 def _on_file_load(_):
-    """Ensure initial slot when a file is loaded."""
+    """Ensure the initial target slot exists when a file is loaded."""
     _ensure_initial_target_slot()
 
+
+def _refresh_key_list(scn):
+    """Rebuild the key list from the current source and target objects."""
+    previous = {item.name: item.use for item in scn.sync_items}
+    scn.sync_items.clear()
+    names = set()
+    src_keys = _get_shape_keys(scn.sync_src_obj)
+    if src_keys:
+        names.update(src_keys.key_blocks.keys())
+    for t in scn.sync_targets:
+        tgt_keys = _get_shape_keys(t.obj)
+        if tgt_keys:
+            names.update(tgt_keys.key_blocks.keys())
+    for name in sorted(names):
+        itm = scn.sync_items.add()
+        itm.name = name
+        itm.use = previous.get(name, True)
+
+
+def _source_obj_update(self, context):
+    """Refresh the key list when the source object changes."""
+    _refresh_key_list(context.scene)
+
+
 def _target_obj_update(self, context):
-    """Auto‑manage the blank slot at the end of the target list."""
-    from bpy import context as _bpy_ctx  # local import to avoid shadowing
-    scn = getattr(context, "scene", None) or _bpy_ctx.scene
+    """Auto-manage the blank slot at the end of the target list."""
+    scn = getattr(context, "scene", None) or bpy.context.scene
     if not scn:
         return
 
     sync_targets = scn.sync_targets
-    
-    # If this is the last slot and the user just picked an object → add a new blank
+
+    # If this is the last slot and the user just picked an object, add a new blank
     if self == sync_targets[-1] and self.obj:
         sync_targets.add()
 
@@ -79,9 +103,37 @@ def _target_obj_update(self, context):
     # Keep the key list in step with the new target selection
     _refresh_key_list(scn)
 
+
+def _update_preview(context):
+    """Apply the preview value to the chosen key on the source and all targets."""
+    scn = context.scene
+    key = scn.preview_key
+    val = max(0.0, min(scn.preview_value, 1.0))
+    src = scn.sync_src_obj
+    targets = [t.obj for t in scn.sync_targets if t.obj]
+    if key:
+        src_keys = _get_shape_keys(src)
+        if src_keys and key in src_keys.key_blocks:
+            src_keys.key_blocks[key].value = val
+        for obj in targets:
+            obj_keys = _get_shape_keys(obj)
+            if obj_keys and key in obj_keys.key_blocks:
+                obj_keys.key_blocks[key].value = val
+
+
+def _preview_value_update(self, context):
+    """Update callback for the preview value slider."""
+    _update_preview(context)
+
+
+# ------------------------------------------------------------------------
+#    Property Groups
+# ------------------------------------------------------------------------
+
 class SyncItem(bpy.types.PropertyGroup):
     name: bpy.props.StringProperty()
     use: bpy.props.BoolProperty(default=True)
+
 
 class TargetItem(bpy.types.PropertyGroup):
     obj: bpy.props.PointerProperty(
@@ -90,17 +142,21 @@ class TargetItem(bpy.types.PropertyGroup):
         update=_target_obj_update,
     )
 
+
 class RecordItem(bpy.types.PropertyGroup):
     obj: bpy.props.PointerProperty(type=bpy.types.Object)
     key: bpy.props.StringProperty()
+
 
 class FoldoutItem(bpy.types.PropertyGroup):
     obj_name: bpy.props.StringProperty()
     expanded: bpy.props.BoolProperty(default=False)
 
+
 # ------------------------------------------------------------------------
 #    Core Sync Functions
 # ------------------------------------------------------------------------
+
 def _purge_dead_records(scn):
     """Drop tracking records whose object has been deleted from the file."""
     if all(rec.obj is not None for rec in scn.sync_records):
@@ -114,6 +170,7 @@ def _purge_dead_records(scn):
 
 
 def sync_shapekey_drivers(src_obj, tgt_obj, key_names, records):
+    """Drive the named keys on tgt_obj from src_obj, tracking each sync."""
     src_keys = _get_shape_keys(src_obj)
     tgt_keys = _get_shape_keys(tgt_obj)
     if not src_keys or not tgt_keys:
@@ -142,6 +199,7 @@ def sync_shapekey_drivers(src_obj, tgt_obj, key_names, records):
 
 
 def unsync_records(records):
+    """Remove the driver for every record, then clear the records."""
     removed = 0
     for rec in records:
         shape_keys = _get_shape_keys(rec.obj)
@@ -156,6 +214,7 @@ def unsync_records(records):
 
 
 def unsync_selected(records, indices):
+    """Remove the drivers for the records at the given indices."""
     removed = 0
     keep = []
     for idx, rec in enumerate(records):
@@ -177,46 +236,8 @@ def unsync_selected(records, indices):
     return removed
 
 
-def _update_preview(context):
-    scn = context.scene
-    key = scn.preview_key
-    val = max(0.0, min(scn.preview_value, 1.0))
-    src = scn.sync_src_obj
-    targets = [t.obj for t in scn.sync_targets if t.obj]
-    if key:
-        src_keys = _get_shape_keys(src)
-        if src_keys and key in src_keys.key_blocks:
-            src_keys.key_blocks[key].value = val
-        for obj in targets:
-            obj_keys = _get_shape_keys(obj)
-            if obj_keys and key in obj_keys.key_blocks:
-                obj_keys.key_blocks[key].value = val
-
-def _refresh_key_list(scn):
-    """Refresh the key list based on current source and target objects."""
-    previous = {item.name: item.use for item in scn.sync_items}
-    scn.sync_items.clear()
-    names = set()
-    src_keys = _get_shape_keys(scn.sync_src_obj)
-    if src_keys:
-        names.update(src_keys.key_blocks.keys())
-    for t in scn.sync_targets:
-        tgt_keys = _get_shape_keys(t.obj)
-        if tgt_keys:
-            names.update(tgt_keys.key_blocks.keys())
-    for name in sorted(names):
-        itm = scn.sync_items.add()
-        itm.name = name
-        itm.use = previous.get(name, True)
-
-def _source_obj_update(self, context):
-    """Update key list when source object changes."""
-    _refresh_key_list(context.scene)
-
-# ------------------------------------------------------------------------
-#    Foldout Helper
-# ------------------------------------------------------------------------
 def rebuild_foldouts(scn):
+    """Rebuild the per-object foldout list, preserving expansion state."""
     old = {f.obj_name: f.expanded for f in scn.sync_foldouts}
     scn.sync_foldouts.clear()
     seen = []
@@ -230,20 +251,27 @@ def rebuild_foldouts(scn):
             f.obj_name = name
             f.expanded = old.get(name, False)
 
+
 # ------------------------------------------------------------------------
 #    Operators
 # ------------------------------------------------------------------------
+
 class SHAPEKEYSYNC_OT_refresh(bpy.types.Operator):
+    """Rebuild the key list from the current source and target objects"""
     bl_idname = "shapekey_sync.refresh_list"
     bl_label = "Refresh Key List"
+
     def execute(self, context):
         _refresh_key_list(context.scene)
         return {'FINISHED'}
 
+
 class SHAPEKEYSYNC_OT_sync(bpy.types.Operator):
+    """Create drivers so the selected keys on every target follow the source"""
     bl_idname = "shapekey_sync.sync"
     bl_label = "Sync ShapeKeys"
     bl_options = {'REGISTER', 'UNDO'}
+
     def execute(self, context):
         scn = context.scene
         _purge_dead_records(scn)
@@ -259,10 +287,13 @@ class SHAPEKEYSYNC_OT_sync(bpy.types.Operator):
         self.report({'INFO'}, f"Synced {total} drivers across {len(targets)} objects.")
         return {'FINISHED'}
 
+
 class SHAPEKEYSYNC_OT_unsync_all(bpy.types.Operator):
+    """Remove every synced driver and clear the tracking records"""
     bl_idname = "shapekey_sync.unsync_all"
     bl_label = "Unsync All"
     bl_options = {'REGISTER', 'UNDO'}
+
     def execute(self, context):
         scn = context.scene
         _purge_dead_records(scn)
@@ -271,12 +302,16 @@ class SHAPEKEYSYNC_OT_unsync_all(bpy.types.Operator):
         self.report({'INFO'}, f"Removed {removed} drivers.")
         return {'FINISHED'}
 
+
 class SHAPEKEYSYNC_OT_unsync_key(bpy.types.Operator):
+    """Remove the synced driver from a single key on one object"""
     bl_idname = "shapekey_sync.unsync_key"
     bl_label = "Unsync Key"
     bl_options = {'REGISTER', 'UNDO'}
+
     obj_name: bpy.props.StringProperty()
     key_name: bpy.props.StringProperty()
+
     def execute(self, context):
         scn = context.scene
         _purge_dead_records(scn)
@@ -286,11 +321,15 @@ class SHAPEKEYSYNC_OT_unsync_key(bpy.types.Operator):
         rebuild_foldouts(scn)
         return {'FINISHED'}
 
+
 class SHAPEKEYSYNC_OT_unsync_object(bpy.types.Operator):
+    """Remove all synced drivers from one object"""
     bl_idname = "shapekey_sync.unsync_object"
     bl_label = "Unsync Object"
     bl_options = {'REGISTER', 'UNDO'}
+
     obj_name: bpy.props.StringProperty()
+
     def execute(self, context):
         scn = context.scene
         _purge_dead_records(scn)
@@ -299,9 +338,9 @@ class SHAPEKEYSYNC_OT_unsync_object(bpy.types.Operator):
         rebuild_foldouts(scn)
         return {'FINISHED'}
 
+
 class SHAPEKEYSYNC_OT_resync_object(bpy.types.Operator):
-    """Resync all recorded keys for this target object
-    (and pick up any NEW keys that now exist on it)."""
+    """Resync all recorded keys for this object, picking up any new keys it has"""
     bl_idname = "shapekey_sync.resync_object"
     bl_label = "Resync Object"
     bl_options = {'REGISTER', 'UNDO'}
@@ -333,7 +372,7 @@ class SHAPEKEYSYNC_OT_resync_object(bpy.types.Operator):
         if idxs:
             unsync_selected(scn.sync_records, idxs)
 
-        # optionally pick up *new* shape keys present on the object
+        # pick up new shape keys present on the object
         tgt_keys = _get_shape_keys(tgt)
         if tgt_keys:
             for kb in tgt_keys.key_blocks:
@@ -345,9 +384,7 @@ class SHAPEKEYSYNC_OT_resync_object(bpy.types.Operator):
         self.report({'INFO'}, f"Resynced {len(keys)} keys on '{self.obj_name}'.")
         return {'FINISHED'}
 
-# ------------------------------------------------------------------------
-#    Operators (Resync All)
-# ------------------------------------------------------------------------
+
 class SHAPEKEYSYNC_OT_resync_all(bpy.types.Operator):
     """Resync every object currently listed in Synced Keys"""
     bl_idname = "shapekey_sync.resync_all"
@@ -362,6 +399,7 @@ class SHAPEKEYSYNC_OT_resync_all(bpy.types.Operator):
             return {'CANCELLED'}
 
         _purge_dead_records(scn)
+
         # build mapping of target -> keys
         obj_keys = {}
         for rec in scn.sync_records:
@@ -390,21 +428,26 @@ class SHAPEKEYSYNC_OT_resync_all(bpy.types.Operator):
         self.report({'INFO'}, f"Resynced {total_keys} keys on {len(obj_keys)} objects.")
         return {'FINISHED'}
 
+
 # ------------------------------------------------------------------------
 #    UI Lists
 # ------------------------------------------------------------------------
+
 class SHAPEKEYSYNC_UL_list_keys(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         layout.prop(item, "use", text="")
         layout.label(text=item.name)
 
+
 class SHAPEKEYSYNC_UL_list_targets(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         layout.prop(item, "obj", text="")
 
+
 # ------------------------------------------------------------------------
 #    Panel
 # ------------------------------------------------------------------------
+
 class SHAPEKEYSYNC_PT_panel(bpy.types.Panel):
     bl_label = "Kiera's ShapeKey Sync v1.2"
     bl_idname = "SHAPEKEYSYNC_PT_panel"
@@ -419,7 +462,12 @@ class SHAPEKEYSYNC_PT_panel(bpy.types.Panel):
         # Source & Targets
         layout.prop(scn, 'sync_src_obj', text='Source Object')
         row = layout.row()
-        row.template_list('SHAPEKEYSYNC_UL_list_targets', '', scn, 'sync_targets', scn, 'sync_target_index', rows=3)
+        row.template_list(
+            'SHAPEKEYSYNC_UL_list_targets', '',
+            scn, 'sync_targets',
+            scn, 'sync_target_index',
+            rows=3,
+        )
 
         # Key List Foldout
         row = layout.row()
@@ -428,12 +476,17 @@ class SHAPEKEYSYNC_PT_panel(bpy.types.Panel):
         if scn.sync_key_list_expanded:
             box = layout.box()
             box.operator('shapekey_sync.refresh_list', icon='FILE_REFRESH', text='Refresh List')
-            box.template_list('SHAPEKEYSYNC_UL_list_keys', '', scn, 'sync_items', scn, 'sync_index', rows=6)
+            box.template_list(
+                'SHAPEKEYSYNC_UL_list_keys', '',
+                scn, 'sync_items',
+                scn, 'sync_index',
+                rows=6,
+            )
 
         # Sync button always visible
         layout.operator('shapekey_sync.sync', icon='DRIVER')
 
-        # Synced Keys Hierarchy
+        # Synced Keys hierarchy
         layout.separator()
         layout.label(text='Synced Keys:')
         for f in scn.sync_foldouts:
@@ -455,7 +508,7 @@ class SHAPEKEYSYNC_PT_panel(bpy.types.Panel):
                         op.obj_name = f.obj_name
                         op.key_name = rec.key
 
-# Resync ALL objects (global button)
+        # Global actions
         layout.operator('shapekey_sync.resync_all', icon='FILE_REFRESH')
         layout.operator('shapekey_sync.unsync_all', icon='X')
 
@@ -465,25 +518,37 @@ class SHAPEKEYSYNC_PT_panel(bpy.types.Panel):
             layout.prop_search(scn, 'preview_key', scn, 'sync_items', text='Preview Key')
             layout.prop(scn, 'preview_value', text='Value')
 
+
 # ------------------------------------------------------------------------
 #    Registration
 # ------------------------------------------------------------------------
+
 classes = [
-    SyncItem, TargetItem, RecordItem, FoldoutItem,
-    SHAPEKEYSYNC_OT_refresh, SHAPEKEYSYNC_OT_sync,
+    SyncItem,
+    TargetItem,
+    RecordItem,
+    FoldoutItem,
+    SHAPEKEYSYNC_OT_refresh,
+    SHAPEKEYSYNC_OT_sync,
     SHAPEKEYSYNC_OT_unsync_all,
-    SHAPEKEYSYNC_OT_unsync_key, SHAPEKEYSYNC_OT_unsync_object,
-    SHAPEKEYSYNC_UL_list_keys, SHAPEKEYSYNC_UL_list_targets,
-    SHAPEKEYSYNC_PT_panel, SHAPEKEYSYNC_OT_resync_object, SHAPEKEYSYNC_OT_resync_all
+    SHAPEKEYSYNC_OT_unsync_key,
+    SHAPEKEYSYNC_OT_unsync_object,
+    SHAPEKEYSYNC_OT_resync_object,
+    SHAPEKEYSYNC_OT_resync_all,
+    SHAPEKEYSYNC_UL_list_keys,
+    SHAPEKEYSYNC_UL_list_targets,
+    SHAPEKEYSYNC_PT_panel,
 ]
+
 
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
+
     bpy.types.Scene.sync_src_obj = bpy.props.PointerProperty(
         type=bpy.types.Object,
         poll=_shape_key_object_poll,
-        update=_source_obj_update
+        update=_source_obj_update,
     )
     bpy.types.Scene.sync_targets = bpy.props.CollectionProperty(type=TargetItem)
     bpy.types.Scene.sync_target_index = bpy.props.IntProperty()
@@ -491,15 +556,16 @@ def register():
     bpy.types.Scene.sync_index = bpy.props.IntProperty()
     bpy.types.Scene.preview_key = bpy.props.StringProperty()
     bpy.types.Scene.preview_value = bpy.props.FloatProperty(
-        name='Value', min=0.0, max=1.0, update=lambda self, ctx: _update_preview(ctx)
+        name='Value', min=0.0, max=1.0, update=_preview_value_update,
     )
     bpy.types.Scene.sync_records = bpy.props.CollectionProperty(type=RecordItem)
     bpy.types.Scene.sync_foldouts = bpy.props.CollectionProperty(type=FoldoutItem)
-    bpy.types.Scene.sync_key_list_expanded = BoolProperty(default=False)
+    bpy.types.Scene.sync_key_list_expanded = bpy.props.BoolProperty(default=False)
 
     if _on_file_load not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_on_file_load)
     timers.register(_ensure_initial_target_slot)
+
 
 def unregister():
     if _on_file_load in bpy.app.handlers.load_post:
@@ -509,6 +575,7 @@ def unregister():
 
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
+
     del bpy.types.Scene.sync_src_obj
     del bpy.types.Scene.sync_targets
     del bpy.types.Scene.sync_target_index
@@ -519,6 +586,7 @@ def unregister():
     del bpy.types.Scene.sync_records
     del bpy.types.Scene.sync_foldouts
     del bpy.types.Scene.sync_key_list_expanded
+
 
 if __name__ == "__main__":
     register()
