@@ -137,15 +137,9 @@ def sync_shapekey_drivers(src_obj, tgt_obj, key_names, records):
     return count
 
 
-def unsync_records(records, filter_targets=None):
+def unsync_records(records):
     removed = 0
-    survivors = []
     for rec in records:
-        if rec.obj is None:
-            continue
-        if filter_targets and rec.obj not in filter_targets:
-            survivors.append((rec.obj, rec.key))
-            continue
         shape_keys = _get_shape_keys(rec.obj)
         if shape_keys:
             try:
@@ -154,10 +148,6 @@ def unsync_records(records, filter_targets=None):
             except Exception:
                 pass
     records.clear()
-    for obj, key in survivors:
-        nr = records.add()
-        nr.obj = obj
-        nr.key = key
     return removed
 
 
@@ -272,8 +262,7 @@ class SHAPEKEYSYNC_OT_unsync_all(bpy.types.Operator):
     def execute(self, context):
         scn = context.scene
         _purge_dead_records(scn)
-        targets = [t.obj for t in scn.sync_targets if t.obj]
-        removed = unsync_records(scn.sync_records, filter_targets=targets)
+        removed = unsync_records(scn.sync_records)
         rebuild_foldouts(scn)
         self.report({'INFO'}, f"Removed {removed} drivers.")
         return {'FINISHED'}
@@ -464,6 +453,7 @@ class SHAPEKEYSYNC_PT_panel(bpy.types.Panel):
 
 # Resync ALL objects (global button)
         layout.operator('shapekey_sync.resync_all', icon='FILE_REFRESH')
+        layout.operator('shapekey_sync.unsync_all', icon='X')
 
         # Preview with search
         if scn.sync_items:
