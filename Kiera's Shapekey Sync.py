@@ -281,6 +281,7 @@ class SHAPEKEYSYNC_OT_unsync_all(bpy.types.Operator):
 class SHAPEKEYSYNC_OT_unsync_key(bpy.types.Operator):
     bl_idname = "shapekey_sync.unsync_key"
     bl_label = "Unsync Key"
+    bl_options = {'REGISTER', 'UNDO'}
     obj_name: bpy.props.StringProperty()
     key_name: bpy.props.StringProperty()
     def execute(self, context):
@@ -295,6 +296,7 @@ class SHAPEKEYSYNC_OT_unsync_key(bpy.types.Operator):
 class SHAPEKEYSYNC_OT_unsync_object(bpy.types.Operator):
     bl_idname = "shapekey_sync.unsync_object"
     bl_label = "Unsync Object"
+    bl_options = {'REGISTER', 'UNDO'}
     obj_name: bpy.props.StringProperty()
     def execute(self, context):
         scn = context.scene
@@ -309,6 +311,7 @@ class SHAPEKEYSYNC_OT_resync_object(bpy.types.Operator):
     (and pick up any NEW keys that now exist on it)."""
     bl_idname = "shapekey_sync.resync_object"
     bl_label = "Resync Object"
+    bl_options = {'REGISTER', 'UNDO'}
 
     obj_name: bpy.props.StringProperty()
 
@@ -356,6 +359,7 @@ class SHAPEKEYSYNC_OT_resync_all(bpy.types.Operator):
     """Resync every object currently listed in Synced Keys"""
     bl_idname = "shapekey_sync.resync_all"
     bl_label = "Resync All Objects"
+    bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
         scn = context.scene
