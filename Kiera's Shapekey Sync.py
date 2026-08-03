@@ -31,6 +31,11 @@ def _shape_key_object_poll(self, obj):
     """Restrict object pickers to types that support shape keys."""
     return obj.type in _SHAPE_KEY_OBJECT_TYPES
 
+
+def _key_data_path(name):
+    """RNA data path for a shape key's value, with the name safely escaped."""
+    return f'key_blocks["{bpy.utils.escape_identifier(name)}"].value'
+
 # ------------------------------------------------------------------------
 #    Property Groups
 # ------------------------------------------------------------------------
@@ -104,7 +109,7 @@ def sync_shapekey_drivers(src_obj, tgt_obj, key_names, records):
     count = 0
     for name in key_names:
         if name in src_keys.key_blocks and name in tgt_keys.key_blocks:
-            path = f'key_blocks["{name}"].value'
+            path = _key_data_path(name)
             try:
                 tgt_keys.driver_remove(path)
             except Exception:
@@ -115,7 +120,7 @@ def sync_shapekey_drivers(src_obj, tgt_obj, key_names, records):
             var = driver.variables.new()
             var.name = 'var'
             var.targets[0].id = src_obj
-            var.targets[0].data_path = f'data.shape_keys.key_blocks["{name}"].value'
+            var.targets[0].data_path = f'data.shape_keys.{_key_data_path(name)}'
             if not any(rec.obj == tgt_obj and rec.key == name for rec in records):
                 rec = records.add()
                 rec.obj = tgt_obj
@@ -136,7 +141,7 @@ def unsync_records(records, filter_targets=None):
         shape_keys = _get_shape_keys(rec.obj)
         if shape_keys:
             try:
-                shape_keys.driver_remove(f'key_blocks["{rec.key}"].value')
+                shape_keys.driver_remove(_key_data_path(rec.key))
                 removed += 1
             except Exception:
                 pass
@@ -156,7 +161,7 @@ def unsync_selected(records, indices):
             shape_keys = _get_shape_keys(rec.obj)
             if shape_keys:
                 try:
-                    shape_keys.driver_remove(f'key_blocks["{rec.key}"].value')
+                    shape_keys.driver_remove(_key_data_path(rec.key))
                     removed += 1
                 except Exception:
                     pass
