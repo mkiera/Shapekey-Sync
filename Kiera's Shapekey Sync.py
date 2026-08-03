@@ -9,8 +9,6 @@ bl_info = {
 }
 
 import bpy
-from bpy.app import timers
-from bpy.app.handlers import persistent
 
 # ------------------------------------------------------------------------
 #    Helpers
@@ -45,21 +43,8 @@ def _key_data_path(name):
 
 
 # ------------------------------------------------------------------------
-#    Update Callbacks & Handlers
+#    Update Callbacks
 # ------------------------------------------------------------------------
-
-def _ensure_initial_target_slot():
-    """Add an initial target slot if the list is empty."""
-    scn = getattr(bpy.context, "scene", None)
-    if scn is not None and len(scn.sync_targets) == 0:
-        scn.sync_targets.add()
-
-
-@persistent
-def _on_file_load(_):
-    """Ensure the initial target slot exists when a file is loaded."""
-    _ensure_initial_target_slot()
-
 
 def _refresh_key_list(scn):
     """Rebuild the key list from the current source and target objects."""
@@ -605,17 +590,8 @@ def register():
     bpy.types.Scene.sync_foldouts = bpy.props.CollectionProperty(type=FoldoutItem)
     bpy.types.Scene.sync_key_list_expanded = bpy.props.BoolProperty(default=False)
 
-    if _on_file_load not in bpy.app.handlers.load_post:
-        bpy.app.handlers.load_post.append(_on_file_load)
-    timers.register(_ensure_initial_target_slot)
-
 
 def unregister():
-    if _on_file_load in bpy.app.handlers.load_post:
-        bpy.app.handlers.load_post.remove(_on_file_load)
-    if timers.is_registered(_ensure_initial_target_slot):
-        timers.unregister(_ensure_initial_target_slot)
-
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
 
