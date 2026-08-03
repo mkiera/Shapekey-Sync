@@ -84,6 +84,18 @@ class FoldoutItem(bpy.types.PropertyGroup):
 # ------------------------------------------------------------------------
 #    Core Sync Functions
 # ------------------------------------------------------------------------
+def _purge_dead_records(scn):
+    """Drop tracking records whose object has been deleted from the file."""
+    if all(rec.obj is not None for rec in scn.sync_records):
+        return
+    survivors = [(rec.obj, rec.key) for rec in scn.sync_records if rec.obj is not None]
+    scn.sync_records.clear()
+    for obj, key in survivors:
+        rec = scn.sync_records.add()
+        rec.obj = obj
+        rec.key = key
+
+
 def sync_shapekey_drivers(src_obj, tgt_obj, key_names, records):
     src_keys = _get_shape_keys(src_obj)
     tgt_keys = _get_shape_keys(tgt_obj)
@@ -115,14 +127,18 @@ def unsync_records(records, filter_targets=None):
     removed = 0
     survivors = []
     for rec in records:
+        if rec.obj is None:
+            continue
         if filter_targets and rec.obj not in filter_targets:
             survivors.append((rec.obj, rec.key))
             continue
-        try:
-            rec.obj.data.shape_keys.driver_remove(f'key_blocks["{rec.key}"].value')
-            removed += 1
-        except Exception:
-            pass
+        shape_keys = _get_shape_keys(rec.obj)
+        if shape_keys:
+            try:
+                shape_keys.driver_remove(f'key_blocks["{rec.key}"].value')
+                removed += 1
+            except Exception:
+                pass
     records.clear()
     for obj, key in survivors:
         nr = records.add()
@@ -136,12 +152,14 @@ def unsync_selected(records, indices):
     keep = []
     for idx, rec in enumerate(records):
         if idx in indices:
-            try:
-                rec.obj.data.shape_keys.driver_remove(f'key_blocks["{rec.key}"].value')
-                removed += 1
-            except Exception:
-                pass
-        else:
+            shape_keys = _get_shape_keys(rec.obj)
+            if shape_keys:
+                try:
+                    shape_keys.driver_remove(f'key_blocks["{rec.key}"].value')
+                    removed += 1
+                except Exception:
+                    pass
+        elif rec.obj is not None:
             keep.append((rec.obj, rec.key))
     records.clear()
     for obj, key in keep:
@@ -195,6 +213,8 @@ def rebuild_foldouts(scn):
     scn.sync_foldouts.clear()
     seen = []
     for rec in scn.sync_records:
+        if rec.obj is None:
+            continue
         name = rec.obj.name
         if name not in seen:
             seen.append(name)
@@ -235,6 +255,7 @@ class SHAPEKEYSYNC_OT_sync(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
     def execute(self, context):
         scn = context.scene
+        _purge_dead_records(scn)
         src = scn.sync_src_obj
         targets = [t.obj for t in scn.sync_targets if t.obj]
         keys = [i.name for i in scn.sync_items if i.use]
@@ -253,6 +274,7 @@ class SHAPEKEYSYNC_OT_unsync_all(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
     def execute(self, context):
         scn = context.scene
+        _purge_dead_records(scn)
         targets = [t.obj for t in scn.sync_targets if t.obj]
         removed = unsync_records(scn.sync_records, filter_targets=targets)
         rebuild_foldouts(scn)
@@ -265,6 +287,7 @@ class SHAPEKEYSYNC_OT_unsync_selected(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
     def execute(self, context):
         scn = context.scene
+        _purge_dead_records(scn)
         idx = scn.sync_records_index
         indices = getattr(scn, 'sync_records_index_set', [idx])
         removed = unsync_selected(scn.sync_records, indices)
@@ -279,6 +302,7 @@ class SHAPEKEYSYNC_OT_unsync_key(bpy.types.Operator):
     key_name: bpy.props.StringProperty()
     def execute(self, context):
         scn = context.scene
+        _purge_dead_records(scn)
         indices = [i for i, rec in enumerate(scn.sync_records)
                    if rec.obj.name == self.obj_name and rec.key == self.key_name]
         unsync_selected(scn.sync_records, indices)
@@ -291,6 +315,7 @@ class SHAPEKEYSYNC_OT_unsync_object(bpy.types.Operator):
     obj_name: bpy.props.StringProperty()
     def execute(self, context):
         scn = context.scene
+        _purge_dead_records(scn)
         indices = [i for i, rec in enumerate(scn.sync_records) if rec.obj.name == self.obj_name]
         unsync_selected(scn.sync_records, indices)
         rebuild_foldouts(scn)
@@ -311,6 +336,7 @@ class SHAPEKEYSYNC_OT_resync_object(bpy.types.Operator):
             self.report({'ERROR'}, "No source object set.")
             return {'CANCELLED'}
 
+        _purge_dead_records(scn)
         tgt = bpy.data.objects.get(self.obj_name)
         if not tgt:
             self.report({'ERROR'}, f"Target '{self.obj_name}' not found.")
@@ -351,6 +377,7 @@ class SHAPEKEYSYNC_OT_resync_all(bpy.types.Operator):
             self.report({'ERROR'}, "No source object set.")
             return {'CANCELLED'}
 
+        _purge_dead_records(scn)
         # build mapping of target -> keys
         obj_keys = {}
         for rec in scn.sync_records:
@@ -434,7 +461,7 @@ class SHAPEKEYSYNC_PT_panel(bpy.types.Panel):
 
             if f.expanded:
                 for rec in scn.sync_records:
-                    if rec.obj.name == f.obj_name:
+                    if rec.obj and rec.obj.name == f.obj_name:
                         r = box.row(align=True)
                         r.label(text=rec.key)
                         op = r.operator('shapekey_sync.unsync_key', text='', icon='X')
