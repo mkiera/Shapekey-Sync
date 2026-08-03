@@ -75,6 +75,9 @@ def _target_obj_update(self, context):
     while len(sync_targets) > 1 and not sync_targets[-1].obj and not sync_targets[-2].obj:
         sync_targets.remove(len(sync_targets) - 1)
 
+    # Keep the key list in step with the new target selection
+    _refresh_key_list(scn)
+
 class SyncItem(bpy.types.PropertyGroup):
     name: bpy.props.StringProperty()
     use: bpy.props.BoolProperty(default=True)
@@ -188,9 +191,8 @@ def _update_preview(context):
             if obj_keys and key in obj_keys.key_blocks:
                 obj_keys.key_blocks[key].value = val
 
-def _refresh_key_list(context):
+def _refresh_key_list(scn):
     """Refresh the key list based on current source and target objects."""
-    scn = context.scene
     previous = {item.name: item.use for item in scn.sync_items}
     scn.sync_items.clear()
     names = set()
@@ -208,7 +210,7 @@ def _refresh_key_list(context):
 
 def _source_obj_update(self, context):
     """Update key list when source object changes."""
-    _refresh_key_list(context)
+    _refresh_key_list(context.scene)
 
 # ------------------------------------------------------------------------
 #    Foldout Helper
@@ -234,7 +236,7 @@ class SHAPEKEYSYNC_OT_refresh(bpy.types.Operator):
     bl_idname = "shapekey_sync.refresh_list"
     bl_label = "Refresh Key List"
     def execute(self, context):
-        _refresh_key_list(context)
+        _refresh_key_list(context.scene)
         return {'FINISHED'}
 
 class SHAPEKEYSYNC_OT_sync(bpy.types.Operator):
