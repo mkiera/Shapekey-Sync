@@ -3,7 +3,7 @@
 A powerful Blender addon that makes it easy to sync shapekeys between multiple objects. Perfect for character rigging, facial animation, and any workflow that requires synchronized shapekeys across multiple meshes.
 
 ![Blender Version](https://img.shields.io/badge/Blender-4.3.1_--_5.2_LTS-blue)
-![License](https://img.shields.io/badge/License-MIT-green)
+![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue)
 
 ## ✨ Features
 
@@ -69,7 +69,7 @@ Found a bug or have a feature request? Feel free to:
 
 ## 📄 License
 
-This addon is released under the MIT License. See the [LICENSE](LICENSE) file for details.
+This addon is released under the GNU General Public License v3.0 or later. See the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 

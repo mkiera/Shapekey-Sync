@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2024 Kiera
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 bl_info = {
     "name": "Kiera's ShapeKey Sync",
     "author": "Kiera",
