@@ -55,6 +55,24 @@ Keep track of your synced shapekeys with these features:
 - **Batch Remove**: Use "Unsync All" to remove all syncs at once
 - **Organize by Object**: Keys are grouped by object for easy management
 
+Resync Object and Resync All Objects refresh only the keys already synced on
+each target. They preserve drivers on excluded keys. To add a key, select it
+in the Key List and click Sync ShapeKeys. This also applies to newly added keys.
+
+Object names in Synced Keys follow renames. Resync and Unsync continue to act
+on the original object even if another object uses its old name.
+
+### Tests
+
+Run the regression suite in an isolated Blender process:
+
+```sh
+blender --background --factory-startup --python-exit-code 1 --python tests/test_resync.py
+```
+
+The suite creates temporary scenes and checks the panel's operator arguments,
+driver preservation, and save/reload behavior. It does not open your working files.
+
 ## 💻 Requirements
 
 - Blender 4.3.1 or newer, including the 5.x series (5.0, 5.1, and 5.2 LTS)
@@ -73,4 +91,4 @@ This addon is released under the GNU General Public License v3.0 or later. See t
 
 ## 🙏 Acknowledgments
 
-Thanks to the Blender community for their support and feedback! 
+Thanks to the Blender community for their support and feedback!
