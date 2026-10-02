@@ -137,7 +137,7 @@ class RecordItem(bpy.types.PropertyGroup):
 
 
 class FoldoutItem(bpy.types.PropertyGroup):
-    obj_name: bpy.props.StringProperty()
+    obj: bpy.props.PointerProperty(type=bpy.types.Object)
     expanded: bpy.props.BoolProperty(default=False)
 
 
@@ -249,18 +249,31 @@ def unsync_selected(records, indices):
 
 def rebuild_foldouts(scn):
     """Rebuild the per-object foldout list, preserving expansion state."""
-    old = {f.obj_name: f.expanded for f in scn.sync_foldouts}
+    old = {f.obj: f.expanded for f in scn.sync_foldouts if f.obj is not None}
     scn.sync_foldouts.clear()
-    seen = []
+    seen = set()
     for rec in scn.sync_records:
         if rec.obj is None:
             continue
-        name = rec.obj.name
-        if name not in seen:
-            seen.append(name)
+        if rec.obj not in seen:
+            seen.add(rec.obj)
             f = scn.sync_foldouts.add()
-            f.obj_name = name
-            f.expanded = old.get(name, False)
+            f.obj = rec.obj
+            f.expanded = old.get(rec.obj, False)
+
+
+@bpy.app.handlers.persistent
+def _rebuild_loaded_foldouts(_):
+    for scn in bpy.data.scenes:
+        if scn.sync_records or scn.sync_foldouts:
+            rebuild_foldouts(scn)
+
+
+def _tracked_target(context):
+    obj = getattr(context, 'sync_target', None)
+    if obj is not None and any(rec.obj == obj for rec in context.scene.sync_records):
+        return obj
+    return None
 
 
 # ------------------------------------------------------------------------
@@ -331,14 +344,17 @@ class SHAPEKEYSYNC_OT_unsync_key(bpy.types.Operator):
     bl_label = "Unsync Key"
     bl_options = {'REGISTER', 'UNDO'}
 
-    obj_name: bpy.props.StringProperty()
     key_name: bpy.props.StringProperty()
 
     def execute(self, context):
         scn = context.scene
         _purge_dead_records(scn)
+        tgt = _tracked_target(context)
+        if tgt is None:
+            self.report({'WARNING'}, "Select a tracked object in Synced Keys.")
+            return {'CANCELLED'}
         indices = [i for i, rec in enumerate(scn.sync_records)
-                   if rec.obj.name == self.obj_name and rec.key == self.key_name]
+                   if rec.obj == tgt and rec.key == self.key_name]
         unsync_selected(scn.sync_records, indices)
         rebuild_foldouts(scn)
         return {'FINISHED'}
@@ -350,24 +366,24 @@ class SHAPEKEYSYNC_OT_unsync_object(bpy.types.Operator):
     bl_label = "Unsync Object"
     bl_options = {'REGISTER', 'UNDO'}
 
-    obj_name: bpy.props.StringProperty()
-
     def execute(self, context):
         scn = context.scene
         _purge_dead_records(scn)
-        indices = [i for i, rec in enumerate(scn.sync_records) if rec.obj.name == self.obj_name]
+        tgt = _tracked_target(context)
+        if tgt is None:
+            self.report({'WARNING'}, "Select a tracked object in Synced Keys.")
+            return {'CANCELLED'}
+        indices = [i for i, rec in enumerate(scn.sync_records) if rec.obj == tgt]
         unsync_selected(scn.sync_records, indices)
         rebuild_foldouts(scn)
         return {'FINISHED'}
 
 
 class SHAPEKEYSYNC_OT_resync_object(bpy.types.Operator):
-    """Resync all recorded keys for this object, picking up any new keys it has"""
+    """Resync the keys already recorded for this object"""
     bl_idname = "shapekey_sync.resync_object"
     bl_label = "Resync Object"
     bl_options = {'REGISTER', 'UNDO'}
-
-    obj_name: bpy.props.StringProperty()
 
     def execute(self, context):
         scn = context.scene
@@ -377,35 +393,28 @@ class SHAPEKEYSYNC_OT_resync_object(bpy.types.Operator):
             return {'CANCELLED'}
 
         _purge_dead_records(scn)
-        tgt = bpy.data.objects.get(self.obj_name)
-        if not tgt:
-            self.report({'ERROR'}, f"Target '{self.obj_name}' not found.")
+        tgt = _tracked_target(context)
+        if tgt is None:
+            self.report({'WARNING'}, "Select a tracked object in Synced Keys.")
             return {'CANCELLED'}
 
         # gather keys already tracked for this object
-        keys = {rec.key for rec in scn.sync_records if rec.obj.name == self.obj_name}
+        keys = {rec.key for rec in scn.sync_records if rec.obj == tgt}
 
         # remove existing drivers/records to avoid duplicates
-        idxs = [i for i, rec in enumerate(scn.sync_records) if rec.obj.name == self.obj_name]
+        idxs = [i for i, rec in enumerate(scn.sync_records) if rec.obj == tgt]
         if idxs:
             unsync_selected(scn.sync_records, idxs)
 
         # the source cannot drive itself, so only its stale records are cleared
         if tgt == src:
             rebuild_foldouts(scn)
-            self.report({'INFO'}, f"'{self.obj_name}' is the source object; cleared its stale syncs.")
+            self.report({'INFO'}, f"'{tgt.name}' is the source object; cleared its stale syncs.")
             return {'FINISHED'}
-
-        # pick up new shape keys present on the object
-        tgt_keys = _get_shape_keys(tgt)
-        if tgt_keys:
-            for kb in tgt_keys.key_blocks:
-                if kb.name not in keys:
-                    keys.add(kb.name)
 
         sync_shapekey_drivers(src, tgt, list(keys), scn.sync_records)
         rebuild_foldouts(scn)
-        self.report({'INFO'}, f"Resynced {len(keys)} keys on '{self.obj_name}'.")
+        self.report({'INFO'}, f"Resynced {len(keys)} keys on '{tgt.name}'.")
         return {'FINISHED'}
 
 
@@ -440,12 +449,6 @@ class SHAPEKEYSYNC_OT_resync_all(bpy.types.Operator):
             # the source cannot drive itself, so its stale records are only cleared
             if tgt == src:
                 continue
-
-            # include any new shapekeys that may have been added
-            tgt_keys = _get_shape_keys(tgt)
-            if tgt_keys:
-                for kb in tgt_keys.key_blocks:
-                    keys.add(kb.name)
 
             sync_shapekey_drivers(src, tgt, list(keys), scn.sync_records)
             total_keys += len(keys)
@@ -520,22 +523,22 @@ class SHAPEKEYSYNC_PT_panel(bpy.types.Panel):
         layout.separator()
         layout.label(text='Synced Keys:')
         for f in scn.sync_foldouts:
+            if f.obj is None:
+                continue
             box = layout.box()
+            box.context_pointer_set('sync_target', f.obj)
             row = box.row()
             icon = 'TRIA_DOWN' if f.expanded else 'TRIA_RIGHT'
-            row.prop(f, 'expanded', icon=icon, emboss=False, text=f.obj_name)
-            re_btn = row.operator('shapekey_sync.resync_object', text='', icon='FILE_REFRESH')
-            re_btn.obj_name = f.obj_name
-            delete_op = row.operator('shapekey_sync.unsync_object', text='', icon='X')
-            delete_op.obj_name = f.obj_name
+            row.prop(f, 'expanded', icon=icon, emboss=False, text=f.obj.name)
+            row.operator('shapekey_sync.resync_object', text='', icon='FILE_REFRESH')
+            row.operator('shapekey_sync.unsync_object', text='', icon='X')
 
             if f.expanded:
                 for rec in scn.sync_records:
-                    if rec.obj and rec.obj.name == f.obj_name:
+                    if rec.obj == f.obj:
                         r = box.row(align=True)
                         r.label(text=rec.key)
                         op = r.operator('shapekey_sync.unsync_key', text='', icon='X')
-                        op.obj_name = f.obj_name
                         op.key_name = rec.key
 
         # Global actions
@@ -592,9 +595,12 @@ def register():
     bpy.types.Scene.sync_records = bpy.props.CollectionProperty(type=RecordItem)
     bpy.types.Scene.sync_foldouts = bpy.props.CollectionProperty(type=FoldoutItem)
     bpy.types.Scene.sync_key_list_expanded = bpy.props.BoolProperty(default=False)
+    bpy.app.handlers.load_post.append(_rebuild_loaded_foldouts)
+    _rebuild_loaded_foldouts(None)
 
 
 def unregister():
+    bpy.app.handlers.load_post.remove(_rebuild_loaded_foldouts)
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
 
