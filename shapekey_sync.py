@@ -4,7 +4,7 @@
 bl_info = {
     "name": "Kiera's ShapeKey Sync",
     "author": "Kiera",
-    "version": (1, 3, 0),
+    "version": (1, 4, 0),
     "blender": (4, 3, 1),
     "location": "View3D > Sidebar > ShapeKey Sync",
     "description": "Batch sync and unsync shapekey drivers with preview, tracking records internally",
@@ -485,7 +485,7 @@ class SHAPEKEYSYNC_UL_list_targets(bpy.types.UIList):
 # ------------------------------------------------------------------------
 
 class SHAPEKEYSYNC_PT_panel(bpy.types.Panel):
-    bl_label = "Kiera's ShapeKey Sync v1.3"
+    bl_label = "Kiera's ShapeKey Sync v1.4"
     bl_idname = "SHAPEKEYSYNC_PT_panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
