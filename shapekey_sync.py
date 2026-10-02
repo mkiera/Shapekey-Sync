@@ -269,6 +269,12 @@ def _rebuild_loaded_foldouts(_):
             rebuild_foldouts(scn)
 
 
+def _rebuild_after_register():
+    if hasattr(bpy.types.Scene, 'sync_foldouts'):
+        _rebuild_loaded_foldouts(None)
+    return None
+
+
 def _tracked_target(context):
     obj = getattr(context, 'sync_target', None)
     if obj is not None and any(rec.obj == obj for rec in context.scene.sync_records):
@@ -596,10 +602,13 @@ def register():
     bpy.types.Scene.sync_foldouts = bpy.props.CollectionProperty(type=FoldoutItem)
     bpy.types.Scene.sync_key_list_expanded = bpy.props.BoolProperty(default=False)
     bpy.app.handlers.load_post.append(_rebuild_loaded_foldouts)
-    _rebuild_loaded_foldouts(None)
+    # bpy.data is restricted while Blender enables add-ons.
+    bpy.app.timers.register(_rebuild_after_register, first_interval=0.0)
 
 
 def unregister():
+    if bpy.app.timers.is_registered(_rebuild_after_register):
+        bpy.app.timers.unregister(_rebuild_after_register)
     bpy.app.handlers.load_post.remove(_rebuild_loaded_foldouts)
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

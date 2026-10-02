@@ -1,10 +1,12 @@
 import importlib.util
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
 
+import addon_utils
 import bpy
 
 
@@ -289,7 +291,7 @@ class ResyncTests(unittest.TestCase):
         self.assertEqual(driver_state(bpy.data.objects['Target'], 'Smile'), unrelated_before)
         self.assertEqual(driver_state(self.target, 'Blink'), before)
 
-    def test_reenable_rebuilds_legacy_foldouts_and_cleans_handler(self):
+    def test_preferences_enable_rebuilds_legacy_foldouts_and_cleans_up(self):
         self.sync(self.target, ['Smile'])
         foldout = bpy.context.scene.sync_foldouts[0]
         foldout.property_unset('obj')
@@ -297,10 +299,31 @@ class ResyncTests(unittest.TestCase):
         self.target.name = 'TargetRenamed'
         addon.unregister()
         self.assertNotIn(addon._rebuild_loaded_foldouts, bpy.app.handlers.load_post)
-        addon.register()
-        self.assertEqual(bpy.context.scene.sync_foldouts[0].obj, self.target)
-        self.assertEqual(bpy.app.handlers.load_post.count(addon._rebuild_loaded_foldouts), 1)
-        self.assertEqual(invoke(panel_action('shapekey_sync.resync_object')), {'FINISHED'})
+        errors = []
+        with tempfile.TemporaryDirectory() as directory:
+            package = Path(directory) / 'shapekey_sync'
+            package.mkdir()
+            shutil.copyfile(ROOT / 'shapekey_sync.py', package / '__init__.py')
+            sys.path.insert(0, directory)
+            try:
+                enabled = addon_utils.enable('shapekey_sync', handle_error=errors.append)
+                self.assertEqual(errors, [])
+                self.assertIsNotNone(enabled)
+                self.assertTrue(bpy.app.timers.is_registered(enabled._rebuild_after_register))
+                enabled._rebuild_after_register()
+                self.assertEqual(bpy.context.scene.sync_foldouts[0].obj, self.target)
+                self.assertEqual(
+                    bpy.app.handlers.load_post.count(enabled._rebuild_loaded_foldouts), 1)
+                self.assertEqual(invoke(panel_action('shapekey_sync.resync_object')), {'FINISHED'})
+                self.assert_synced(self.target, 'Smile')
+                addon_utils.disable('shapekey_sync', handle_error=errors.append)
+                self.assertEqual(errors, [])
+                self.assertFalse(bpy.app.timers.is_registered(enabled._rebuild_after_register))
+                self.assertNotIn(enabled._rebuild_loaded_foldouts, bpy.app.handlers.load_post)
+            finally:
+                sys.path.remove(directory)
+                sys.modules.pop('shapekey_sync', None)
+                addon.register()
 
     def test_resynced_driver_evaluates_from_changed_source(self):
         before = self.rig_driver(self.target, 'Blink')
